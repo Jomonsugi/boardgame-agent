@@ -39,6 +39,10 @@ Create a game in the sidebar, upload a rulebook PDF, and ask a question. That's 
 
 **Switching LLM models.** Use the dropdown in the sidebar. Changing the model resets the current conversation (you'll be warned first).
 
+**Picture enrichment (VLM).** Board game rulebooks are full of icons, symbols, and diagrams that plain text extraction misses. Expand the **Picture enrichment** panel on any PDF document to describe these images with a local vision-language model. Three Docling-native VLM presets are available — SmolVLM (256M), Granite-Vision (2B), and Qwen2.5-VL (3B) — all run locally on Apple Silicon (MPS). Descriptions are embedded into the index so the agent can reference visual elements when answering questions. Re-enriching with a different model overwrites the previous descriptions and automatically re-indexes.
+
+**Spread pages.** Some rulebooks use landscape two-page spreads. Check the **Spreads** checkbox on a document to split each landscape page into two logical half-pages. This improves both retrieval accuracy and citation highlighting for spread layouts.
+
 **Rebuild index.** After changing the embedding model in `config.py`, click **Rebuild index** in the sidebar. This re-embeds all cached documents — extraction does not re-run.
 
 ## LLM providers
