@@ -22,7 +22,7 @@ from docling.datamodel.pipeline_options import (
 )
 from docling.document_converter import DocumentConverter, PdfFormatOption
 
-from boardgame_agent.config import DATA_DIR, VLM_PICTURE_AREA_THRESHOLD
+from boardgame_agent.config import DATA_DIR
 
 # Custom prompt tuned for board game rulebook icons and symbols.
 _VLM_PROMPT = (
@@ -53,7 +53,7 @@ def _extract_single_pdf(
         pipeline_options.do_picture_description = True
         desc_options = PictureDescriptionVlmEngineOptions.from_preset(vlm_preset)
         desc_options.prompt = _VLM_PROMPT
-        desc_options.picture_area_threshold = VLM_PICTURE_AREA_THRESHOLD
+        desc_options.picture_area_threshold = 0.0
         pipeline_options.picture_description_options = desc_options
 
     converter = DocumentConverter(

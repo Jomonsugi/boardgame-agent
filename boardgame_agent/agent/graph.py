@@ -90,15 +90,19 @@ def build_agent(
         enable_web_search=enable_web_search,
     )
 
-    # Build document list for the system prompt.
-    docs = get_documents(game_id, GAMES_DB_PATH)
-    doc_tuples = [(d["doc_name"], d.get("doc_tag", "rulebook")) for d in docs]
-
     llm = _build_llm(model_name)
     llm_with_tools = llm.bind_tools(tools)
-    system_message = SystemMessage(
-        content=build_system_prompt(game_name, documents=doc_tuples, web_search_enabled=enable_web_search)
-    )
+
+    def _build_system_message() -> SystemMessage:
+        """Build the system prompt fresh from the database each call."""
+        docs = get_documents(game_id, GAMES_DB_PATH)
+        doc_tuples = [
+            (d["doc_name"], d.get("doc_tag", "rulebook"), d.get("description"))
+            for d in docs
+        ]
+        return SystemMessage(
+            content=build_system_prompt(game_name, documents=doc_tuples, web_search_enabled=enable_web_search)
+        )
 
     # ── Nodes ─────────────────────────────────────────────────────────────────
 
@@ -126,7 +130,7 @@ def build_agent(
             else:
                 compressed.append(m)
 
-        response = llm_with_tools.invoke([system_message] + compressed)
+        response = llm_with_tools.invoke([_build_system_message()] + compressed)
         return {"messages": [response]}
 
     tool_node = ToolNode(tools)

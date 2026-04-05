@@ -250,27 +250,20 @@ def main() -> None:
         st.session_state.current_model = selected_model
         st.session_state.current_web_search = enable_web_search
 
-    # Warn when model or web search toggle changes mid-conversation.
-    def _reset_session():
+    # Reset conversation when model or web search setting changes.
+    model_changed = selected_model != st.session_state.get("current_model")
+    web_search_changed = enable_web_search != st.session_state.get("current_web_search")
+
+    if model_changed or web_search_changed:
         st.session_state.messages = []
         st.session_state.active_citation = None
         st.session_state.active_doc = None
         st.session_state.session_thread_id = str(uuid.uuid4())
-
-    model_changed = selected_model != st.session_state.get("current_model")
-    web_search_changed = enable_web_search != st.session_state.get("current_web_search")
-
-    if (model_changed or web_search_changed) and st.session_state.messages:
-        reason = "model" if model_changed else "web search setting"
-        st.warning(f"Changing the {reason} will reset the current conversation.")
-        if st.button(f"Confirm {reason} change", key="confirm_setting_change"):
-            _reset_session()
-            st.session_state.current_model = selected_model
-            st.session_state.current_web_search = enable_web_search
-            st.rerun()
-        # Block the rest of the page until confirmed — use previous settings.
-        selected_model = st.session_state.get("current_model", selected_model)
-        enable_web_search = st.session_state.get("current_web_search", enable_web_search)
+        st.session_state.current_model = selected_model
+        st.session_state.current_web_search = enable_web_search
+        if model_changed:
+            st.toast(f"Switched to {selected_model}")
+        st.rerun()
     else:
         st.session_state.current_model = selected_model
         st.session_state.current_web_search = enable_web_search

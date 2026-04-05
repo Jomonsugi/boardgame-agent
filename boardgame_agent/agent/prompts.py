@@ -5,7 +5,7 @@ from __future__ import annotations
 
 def build_system_prompt(
     game_name: str,
-    documents: list[tuple[str, str]] | None = None,
+    documents: list[tuple[str, str, str | None]] | None = None,
     web_search_enabled: bool = True,
 ) -> str:
     """Build the system prompt with dynamic document list and optional web search."""
@@ -33,9 +33,14 @@ def build_system_prompt(
     docs_section = ""
     has_rulebook = False
     if documents:
-        doc_lines = [f"  - {name} ({tag})" for name, tag in documents]
+        doc_lines = []
+        for name, tag, desc in documents:
+            if desc:
+                doc_lines.append(f"  - {name} ({tag}): {desc}")
+            else:
+                doc_lines.append(f"  - {name} ({tag})")
         docs_section = "\nDocuments indexed for this game:\n" + "\n".join(doc_lines) + "\n"
-        has_rulebook = any(tag == "rulebook" for _, tag in documents)
+        has_rulebook = any(tag == "rulebook" for _, tag, _ in documents)
 
     # ── Search strategy ───────────────────────────────────────────────────
     if has_rulebook:

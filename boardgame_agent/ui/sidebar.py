@@ -30,6 +30,7 @@ from boardgame_agent.db.games import (
     init_db,
     register_document,
     remove_search_domain,
+    update_description,
     update_doc_tag,
     update_has_spreads,
     update_vlm_enrichment,
@@ -134,7 +135,7 @@ def render_sidebar() -> tuple[str | None, str | None, str, int, bool]:
 
         if docs:
             for doc in docs:
-                col_name, col_tag, col_spread, col_del = st.columns([4, 3, 2, 1])
+                col_name, col_tag, col_del = st.columns([4, 3, 1])
                 col_name.write(f"📄 {doc['doc_name']}")
                 current_tag = doc.get("doc_tag", "rulebook")
                 new_tag = col_tag.text_input(
@@ -148,29 +149,46 @@ def render_sidebar() -> tuple[str | None, str | None, str, int, bool]:
                     update_doc_tag(selected_game_id, doc["doc_name"], new_tag)
                     update_doc_tag_in_index(selected_game_id, doc["doc_name"], new_tag)
                     st.rerun()
-                current_spreads = bool(doc.get("has_spreads", 0))
-                new_spreads = col_spread.checkbox(
-                    "Spreads",
-                    value=current_spreads,
-                    key=f"spread_{doc['doc_name']}",
-                    help="Check if this PDF has two-page spreads (landscape pages with two logical pages side by side).",
-                )
-                if new_spreads != current_spreads:
-                    update_has_spreads(selected_game_id, doc["doc_name"], new_spreads)
-                    # Re-extract with the new spread setting and rebuild the index
-                    doc_path = Path(doc.get("pdf_path", ""))
-                    if doc_path.exists():
-                        with st.spinner(f"Re-indexing {doc['doc_name']} with spread {'on' if new_spreads else 'off'}…"):
-                            _reindex_doc(selected_game_id, doc["doc_name"], doc_path, current_tag, new_spreads)
-                    st.rerun()
                 if col_del.button("✕", key=f"del_doc_{doc['doc_name']}", help="Remove"):
                     _remove_document(selected_game_id, doc["doc_name"])
                     st.rerun()
 
-                # VLM picture enrichment (PDF documents only)
-                from boardgame_agent.ui.pdf_panel import get_pdf_path
-                if get_pdf_path(selected_game_id, doc["doc_name"]):
-                    with st.expander("Picture enrichment", expanded=False):
+                with st.expander("Options", expanded=False):
+                    # Description
+                    current_desc = doc.get("description") or ""
+                    new_desc = st.text_area(
+                        "Description",
+                        value=current_desc,
+                        key=f"desc_{doc['doc_name']}",
+                        placeholder="Describe what this document contains...",
+                        help="Optional. Helps the agent decide when to consult this document.",
+                        max_chars=200,
+                        height=68,
+                    )
+                    if new_desc != current_desc:
+                        update_description(selected_game_id, doc["doc_name"], new_desc)
+                        st.rerun()
+
+                    # Spread pages
+                    current_spreads = bool(doc.get("has_spreads", 0))
+                    new_spreads = st.checkbox(
+                        "Two-page spreads",
+                        value=current_spreads,
+                        key=f"spread_{doc['doc_name']}",
+                        help="Check if this PDF has landscape pages with two logical pages side by side.",
+                    )
+                    if new_spreads != current_spreads:
+                        update_has_spreads(selected_game_id, doc["doc_name"], new_spreads)
+                        doc_path = Path(doc.get("pdf_path", ""))
+                        if doc_path.exists():
+                            with st.spinner(f"Re-indexing {doc['doc_name']} with spread {'on' if new_spreads else 'off'}…"):
+                                _reindex_doc(selected_game_id, doc["doc_name"], doc_path, current_tag, new_spreads)
+                        st.rerun()
+
+                    # VLM picture enrichment (PDF only)
+                    from boardgame_agent.ui.pdf_panel import get_pdf_path
+                    if get_pdf_path(selected_game_id, doc["doc_name"]):
+                        st.markdown("**Picture enrichment**")
                         current_vlm = doc.get("vlm_model")
                         vlm_labels = list(VLM_PRESETS.keys())
                         default_idx = next(
@@ -196,14 +214,12 @@ def render_sidebar() -> tuple[str | None, str | None, str, int, bool]:
                                     has_spreads=current_spreads,
                                 )
                                 update_vlm_enrichment(selected_game_id, doc["doc_name"], selected_vlm_preset)
-                                # Re-index with enriched text
                                 _reindex_after_enrichment(selected_game_id, doc["doc_name"], current_tag)
                             st.success(f"Enriched {count} pictures with {selected_vlm_label}")
                             st.rerun()
                         if current_vlm:
                             enriched_at = doc.get("vlm_enriched_at", "")
                             st.caption(f"Enriched with {current_vlm} ({enriched_at[:10] if enriched_at else ''})")
-                    st.rerun()
         else:
             st.caption("No documents indexed yet.")
 

@@ -72,6 +72,8 @@ def init_db(db_path: Path = GAMES_DB_PATH) -> None:
             conn.execute("ALTER TABLE documents ADD COLUMN vlm_model TEXT")
         if "vlm_enriched_at" not in cols:
             conn.execute("ALTER TABLE documents ADD COLUMN vlm_enriched_at TEXT")
+        if "description" not in cols:
+            conn.execute("ALTER TABLE documents ADD COLUMN description TEXT")
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS game_search_domains (
@@ -216,6 +218,20 @@ def update_doc_tag(
         conn.execute(
             "UPDATE documents SET doc_tag = ? WHERE game_id = ? AND doc_name = ?",
             (doc_tag, game_id, doc_name),
+        )
+
+
+def update_description(
+    game_id: str,
+    doc_name: str,
+    description: str | None,
+    db_path: Path = GAMES_DB_PATH,
+) -> None:
+    """Update the optional description for a document."""
+    with _connect(db_path) as conn:
+        conn.execute(
+            "UPDATE documents SET description = ? WHERE game_id = ? AND doc_name = ?",
+            (description or None, game_id, doc_name),
         )
 
 
