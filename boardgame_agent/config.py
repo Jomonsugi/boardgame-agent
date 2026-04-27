@@ -71,17 +71,8 @@ COHERE_API_KEY: str | None = os.getenv("COHERE_API_KEY")
 COHERE_RERANK_MODEL: str = "rerank-v3.5"
 FASTEMBED_RERANK_MODEL: str = "BAAI/bge-reranker-base"
 
-# ── Glossary (icon/symbol extraction) ────────────────────────────────────────
-# Bbox area thresholds (pts²) for distinguishing icons from illustrations.
-ICON_AREA_MAX: float = 5000.0   # Larger bboxes are likely full illustrations
-ICON_AREA_MIN: float = 100.0    # Smaller bboxes are likely noise
-LEGEND_SCORE_THRESHOLD: float = 0.4  # Pages scoring above this are legends
-ICON_HASH_MATCH_THRESHOLD: int = 5   # DHash hamming distance: confident match
-ICON_HASH_FUZZY_THRESHOLD: int = 8   # DHash hamming distance: fuzzy match
-
-# VLM for glossary building and page vision tool.
-# Can use any vision-capable model from MODEL_OPTIONS, or a Together vision model.
-GLOSSARY_VLM_MODEL: str = "claude-sonnet-4-6"
+# ── Page Vision ──────────────────────────────────────────────────────────────
+# VLM for the view_page tool. Can use any vision-capable model from MODEL_OPTIONS.
 PAGE_VISION_MODEL: str = "claude-sonnet-4-6"
 PAGE_VISION_DPI: int = 150
 

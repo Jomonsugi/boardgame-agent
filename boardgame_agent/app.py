@@ -324,8 +324,6 @@ def main() -> None:
                         status_container.update(label="Searching the web...")
                     elif tool_name == "get_past_answers":
                         status_container.update(label="Checking past answers...")
-                    elif tool_name == "lookup_glossary":
-                        status_container.update(label="Looking up icon glossary...")
                     elif tool_name == "view_page":
                         status_container.update(label="Analyzing page visually...")
                     elif tool_name == "submit_answer":

@@ -38,7 +38,6 @@ Respond with ONLY valid JSON (no markdown fencing):
 def classify_and_plan(
     state: AgentState,
     llm: Any,
-    has_glossary: bool = False,
 ) -> dict:
     """Check if the answer is already in conversation context.
 

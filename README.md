@@ -48,12 +48,11 @@ Upload your rulebook PDF and any supplemental documents (FAQ, player aids, icon 
 
 ### 3. Processing options (on by default)
 
-When uploading PDFs, two options are checked by default:
+When uploading PDFs, you can enable:
 
-- **Enrich pictures with VLM descriptions** — a local vision model (Qwen2.5-VL 3B) describes every icon, symbol, and diagram in the PDF. This makes visual elements searchable. Uncheck for text-only rulebooks where icons aren't important.
-- **Build icon glossary after indexing** — automatically builds a structured glossary that maps icons to their game-specific meanings by detecting legend pages and cross-referencing icon definitions. Uncheck for simple games without meaningful iconography.
+- **Enrich pictures with VLM descriptions** (on by default) — a local vision model (Qwen2.5-VL 3B via MLX) describes every icon, symbol, and diagram in the PDF. This makes visual elements searchable. Uncheck for text-only rulebooks where icons aren't important.
 
-Both can be done later from the sidebar if you skip them during upload.
+This can be done later from the sidebar if you skip it during upload.
 
 ### 4. Ask questions
 
@@ -83,18 +82,6 @@ When the agent finds information in a supplement or logbook that references game
 ### Citations
 
 Every answer includes clickable citation chips showing document name and page number. Click a citation to view the PDF page with highlighted bounding boxes around the cited text. Citations come from text retrieval — the agent must find and cite the actual rules, not guess.
-
-### Icon glossary
-
-For games with meaningful icons (The Crew, Ark Nova, Gloomhaven), the glossary builder:
-
-- Detects legend/reference pages automatically (heuristic scoring)
-- Links icons to adjacent text labels using spatial proximity
-- Deduplicates icons across all documents using perceptual hashing (DHash)
-- Resolves unmatched icons on legend pages using a vision model
-- Makes icon meanings searchable via the `lookup_glossary` tool
-
-View, rebuild, or reindex with glossary enrichment from the sidebar.
 
 ### Re-ranking
 

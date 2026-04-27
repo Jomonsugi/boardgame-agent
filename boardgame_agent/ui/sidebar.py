@@ -223,45 +223,6 @@ def render_sidebar() -> tuple[str | None, str | None, str, int, bool, bool]:
         else:
             st.caption("No documents indexed yet.")
 
-        # ── Icon Glossary ─────────────────────────────────────────────────
-        st.subheader("Icon Glossary")
-        glossary_path = DATA_DIR / "games" / selected_game_id / "glossary.json"
-        if glossary_path.exists():
-            import json as _json
-            gdata = _json.loads(glossary_path.read_text(encoding="utf-8"))
-            n_entries = len(gdata.get("entries", []))
-            n_unresolved = len(gdata.get("unresolved", []))
-            st.caption(f"{n_entries} icons resolved, {n_unresolved} unresolved")
-            with st.expander("View glossary entries"):
-                for entry in gdata.get("entries", [])[:30]:
-                    conf = entry.get("confidence", 1.0)
-                    conf_label = f" ({conf:.0%})" if conf < 1.0 else ""
-                    st.markdown(f"**{entry['name']}**{conf_label}: {entry['meaning']}")
-            col_rebuild, col_reindex, col_remove = st.columns(3)
-            if col_rebuild.button("Rebuild", key="rebuild_glossary"):
-                _build_glossary_ui(selected_game_id)
-                _invalidate_agent_cache()
-                st.rerun()
-            if col_reindex.button("Reindex", key="reindex_glossary",
-                                  help="Re-embed all documents with icon meanings injected into chunk text."):
-                with st.spinner("Reindexing documents with glossary enrichment..."):
-                    reindex_all()
-                _invalidate_agent_cache()
-                st.success("Reindex complete.")
-                st.rerun()
-            if col_remove.button("Remove", key="remove_glossary",
-                                 help="Delete the glossary. The lookup_glossary tool will no longer be available."):
-                glossary_path.unlink()
-                _invalidate_agent_cache()
-                st.toast("Glossary removed.")
-                st.rerun()
-        else:
-            st.caption("No glossary built yet.")
-            if docs and st.button("Build Icon Glossary", key="build_glossary", type="primary"):
-                _build_glossary_ui(selected_game_id)
-                _invalidate_agent_cache()
-                st.rerun()
-
         st.divider()
 
         # Upload new documents
@@ -297,19 +258,12 @@ def render_sidebar() -> tuple[str | None, str | None, str, int, bool, bool]:
             # Processing options — on by default, user can uncheck.
             has_pdfs = any(Path(uf.name).suffix.lower() == ".pdf" for uf in uploaded)
             enrich_pictures = False
-            build_glossary_after = False
             if has_pdfs:
                 enrich_pictures = st.checkbox(
                     "Enrich pictures with VLM descriptions",
                     value=True,
                     key="upload_enrich_pictures",
                     help="Uses a vision model to describe icons and images during extraction. Recommended for games with icons.",
-                )
-                build_glossary_after = st.checkbox(
-                    "Build icon glossary after indexing",
-                    value=True,
-                    key="upload_build_glossary",
-                    help="Automatically builds an icon glossary from all documents. Recommended for games with icon-heavy pages.",
                 )
 
             if st.button(
@@ -322,9 +276,6 @@ def render_sidebar() -> tuple[str | None, str | None, str, int, bool, bool]:
                     selected_game_id, uploaded, file_tags, file_spreads,
                     vlm_preset=vlm_preset,
                 )
-                if build_glossary_after:
-                    _build_glossary_ui(selected_game_id)
-                    _invalidate_agent_cache()
                 st.rerun()
 
         # Folder path shortcut (useful for local use)
@@ -513,44 +464,16 @@ def _reindex_after_enrichment(game_id: str, doc_name: str, doc_tag: str) -> None
     build_index(chunks)
 
 
-def _invalidate_agent_cache() -> None:
-    """Clear the cached agent so it rebuilds with updated tools/glossary."""
-    try:
-        from boardgame_agent.app import get_agent
-        get_agent.clear()
-    except Exception:
-        pass  # Cache may not exist yet on first run.
-
-
-def _build_glossary_ui(game_id: str) -> None:
-    """Run the glossary builder with a Streamlit progress display."""
-    from boardgame_agent.glossary.builder import build_glossary
-
-    status = st.status("Building icon glossary...", expanded=True)
-    def on_progress(msg: str):
-        status.write(msg)
-
-    try:
-        glossary = build_glossary(game_id, on_progress=on_progress)
-        n = len(glossary.entries)
-        u = len(glossary.unresolved)
-        status.update(label=f"Glossary built: {n} icons, {u} unresolved", state="complete")
-    except Exception as e:
-        status.update(label=f"Glossary build failed: {e}", state="error")
-
-
 def _suggest_doc_tag(text: str) -> str:
     """Suggest a doc_tag based on keywords in a filename or page text.
 
-    Handles obvious cases (icon references, FAQs, player aids). For ambiguous
-    documents, defaults to 'rulebook' — the user can always adjust before indexing.
+    Handles obvious cases (FAQs, player aids). For ambiguous documents,
+    defaults to 'rulebook' — the user can always adjust before indexing.
     """
     text = text.lower().replace("-", " ").replace("_", " ")
-    if any(kw in text for kw in ("icon overview", "icon reference", "symbol reference", "symbol glossary")):
-        return "icon_reference"
     if any(kw in text for kw in ("faq", "frequently asked", "errata", "clarification")):
         return "faq"
-    if any(kw in text for kw in ("quick reference", "player aid", "reference card", "cheat sheet", "player_aid")):
+    if any(kw in text for kw in ("quick reference", "player aid", "reference card", "cheat sheet")):
         return "quick_reference"
     if any(kw in text for kw in ("appendix", "glossary")):
         return "supplement"

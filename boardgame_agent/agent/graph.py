@@ -33,7 +33,6 @@ from boardgame_agent.agent.tools import make_all_tools
 from boardgame_agent.config import (
     ANTHROPIC_API_KEY,
     CHECKPOINTS_DB_PATH,
-    DATA_DIR,
     DEFAULT_MODEL,
     GAMES_DB_PATH,
     MODEL_OPTIONS,
@@ -70,11 +69,6 @@ def _build_llm(model_name: str):
         return ChatTogether(model=model_name, together_api_key=key, temperature=0)
 
 
-def _has_glossary(game_id: str) -> bool:
-    """Check whether a built glossary exists for this game."""
-    return (DATA_DIR / "games" / game_id / "glossary.json").exists()
-
-
 def build_agent(
     game_id: str,
     game_name: str,
@@ -92,19 +86,42 @@ def build_agent(
     from boardgame_agent.db.games import get_documents
 
     qdrant_client = get_qdrant_client()
-    glossary_exists = _has_glossary(game_id)
     agent_config: dict = {
         "top_k": RETRIEVAL_TOP_K,
         "enable_web_search": True,
         "enable_page_vision": False,
     }
-    tools = make_all_tools(
+    all_tools = make_all_tools(
         game_id, game_name, qdrant_client, agent_config, GAMES_DB_PATH,
-        enable_glossary=glossary_exists,
     )
 
     llm = _build_llm(model_name)
-    llm_with_tools = llm.bind_tools(tools)
+
+    # ── Dynamic tool binding ─────────────────────────────────────────────
+    # Tools are bound per invocation based on agent_config toggles.
+    # ToolNode keeps all tools registered (for execution), but the LLM
+    # only sees currently-enabled tools in its schema — no wasted tokens,
+    # no "tool not available" messages the model ignores.
+    _TOGGLE_KEYS = {"view_page": "enable_page_vision", "search_web": "enable_web_search"}
+    _bind_cache: dict[tuple, object] = {}
+
+    def _get_bound_model():
+        """Return the LLM with currently-enabled tools bound.
+
+        Reads agent_config at call time so sidebar toggles take effect
+        on the next query without recompiling the graph.
+        """
+        cache_key = tuple(
+            agent_config.get(key, True) for key in _TOGGLE_KEYS.values()
+        )
+        if cache_key not in _bind_cache:
+            active = [
+                t for t in all_tools
+                if t.name not in _TOGGLE_KEYS
+                or agent_config.get(_TOGGLE_KEYS[t.name], True)
+            ]
+            _bind_cache[cache_key] = llm.bind_tools(active)
+        return _bind_cache[cache_key]
 
     def _build_system_message(plan: list[str] | None = None) -> SystemMessage:
         """Build the system prompt fresh from the database each call."""
@@ -117,7 +134,6 @@ def build_agent(
             content=build_system_prompt(
                 game_name,
                 documents=doc_tuples,
-                has_glossary=glossary_exists,
                 plan=plan,
             )
         )
@@ -126,7 +142,7 @@ def build_agent(
 
     def planner(state: AgentState) -> dict:
         """Check if the answer is already in conversation context."""
-        return classify_and_plan(state, llm, has_glossary=glossary_exists)
+        return classify_and_plan(state, llm)
 
     def call_agent(state: AgentState) -> dict:
         all_messages = list(state["messages"])
@@ -153,10 +169,11 @@ def build_agent(
                 compressed.append(m)
 
         plan = state.get("plan")
-        response = llm_with_tools.invoke([_build_system_message(plan=plan)] + compressed)
+        bound_model = _get_bound_model()
+        response = bound_model.invoke([_build_system_message(plan=plan)] + compressed)
         return {"messages": [response]}
 
-    tool_node = ToolNode(tools)
+    tool_node = ToolNode(all_tools)
 
     def finalize(state: AgentState) -> dict:
         """Extract structured answer from submit_answer tool output (no LLM call).
@@ -250,7 +267,7 @@ def _make_input(game_id: str, query: str) -> dict:
 def _make_config(thread_id: str | None) -> dict:
     return {
         "configurable": {"thread_id": thread_id or str(uuid.uuid4())},
-        "recursion_limit": 15,
+        "recursion_limit": 20,
     }
 
 

@@ -19,8 +19,7 @@ User question
                  │  ┌─────────┐    ┌───────────────────────────┐    │
                  │  │  Agent  │◀──▶│         Tools             │    │
                  │  │  (LLM)  │    │  search_rulebook          │    │
-                 │  └────┬────┘    │  lookup_glossary          │    │
-                 │       │         │  view_page                │    │
+                 │  └────┬────┘    │  view_page                │    │
                  │       │         │  search_web               │    │
                  │       │         │  get_past_answers         │    │
                  │       │         │  submit_answer            │    │
@@ -76,7 +75,7 @@ PDF ──▶ Docling ──▶ per-page JSON with bounding boxes
 
 **Why Docling?** It handles complex multi-column layouts, tables, and returns per-item bounding boxes with provenance. The bboxes are the foundation of the citation system — without them, we can't highlight specific text regions in the PDF viewer.
 
-**Why VLM enrichment at extraction time?** Board game rulebooks communicate heavily through icons. Without VLM descriptions, picture bboxes have empty text and are invisible to search. The VLM prompt is deliberately minimal: "Describe exactly what you see: shapes, colors, numbers, and any text. Do not guess what it means or represents." Meaning is resolved later by the glossary, not here.
+**Why VLM enrichment at extraction time?** Board game rulebooks communicate heavily through icons. Without VLM descriptions, picture bboxes have empty text and are invisible to search. The VLM prompt is deliberately minimal: "Describe exactly what you see: shapes, colors, numbers, and any text. Do not guess what it means or represents." Meaning resolution happens at query time through the agent's cross-referencing behavior.
 
 **Package: `docling`** — PDF parsing with per-item bounding boxes
 **Package: `pymupdf` (fitz)** — PDF rendering, page cropping, bbox coordinate conversion
@@ -189,9 +188,7 @@ planner ──▶ agent ◀──▶ tools ──▶ finalize ──▶ END
 The system prompt is the core intelligence of the system. It's rebuilt dynamically each call with:
 
 - The current document list (names, tags, descriptions)
-- Tool descriptions (conditional on what's available — glossary tool only appears when a glossary exists)
 - A conversation-context skip marker (when planner detects a follow-up)
-- Icon guidance (when glossary exists)
 
 The critical section is "How to reason" — the introspection loop that teaches the agent to evaluate its own understanding after every search and keep going when gaps exist. This is what makes the agent cross-reference instead of answering from a single source.
 
@@ -200,83 +197,35 @@ The critical section is "How to reason" — the introspection loop that teaches 
 | Tool | Purpose | Produces citations? |
 |------|---------|-------------------|
 | `search_rulebook` | Hybrid search over indexed documents with tag filtering | Yes — doc_name, page_num, bbox_indices |
-| `lookup_glossary` | Semantic search over the game's icon glossary | Yes — doc_name, page_num, bbox_indices from glossary entries |
 | `view_page` | VLM analysis of a rendered page image | No — helps the agent understand what to search for next |
 | `search_web` | Tavily web search restricted to configured domains | Yes — URL + finding (no bbox) |
 | `get_past_answers` | Semantic search over accepted Q&A history | No — used for consistency, not citation |
 | `submit_answer` | Formats the final answer with merged citations | N/A — this IS the output |
 
-**Citation hierarchy**: `search_rulebook` and `lookup_glossary` are the primary citation sources. `view_page` is a comprehension aid — it helps the agent understand visual content, but the agent must then search for and cite the text-based rules. `search_web` provides URL citations but no bbox highlights.
+**Citation hierarchy**: `search_rulebook` is the primary citation source. `view_page` is a comprehension aid — it helps the agent understand visual content, but the agent must then search for and cite the text-based rules. `search_web` provides URL citations but no bbox highlights.
 
 ---
 
-## Icon glossary pipeline
+## Picture bbox foundation
 
-### Why it exists
+Docling labels every non-text visual element in a PDF as a `picture` bbox with coordinates. When VLM enrichment is enabled (on by default), a local VLM (Qwen 3B via MLX) adds a text description to each picture bbox:
 
-Board game rulebooks communicate through icons. A mission page might show numbered squares, colored starbursts, and symbol badges — all meaningful to the game, all invisible to text search. Without the glossary, the agent sees VLM descriptions like "dark square with number 1" but has no way to know this means "first task to complete in order."
-
-The glossary bridges visual content to searchable game terms.
-
-### Pipeline stages
-
-```
-All extracted pages for a game
-    │
-    ▼
-1. Detect legend/reference pages (heuristic scoring)
-   - Icon-reference documents (tagged or auto-detected from filename)
-   - Pages with high icon density, short text labels, grid alignment, keywords
-    │
-    ▼
-2. Build icon inventory
-   - Crop all icon-sized picture bboxes from PDFs (area filtering)
-   - Compute DHash (perceptual hash) for deduplication
-   - Cluster by hash similarity (hamming distance ≤ 5)
-    │
-    ▼
-3. Resolve meanings
-   - Legend/reference pages: spatial proximity links each icon to adjacent text
-     (centroid distance with directional bias — prefer below and right)
-   - Hash matching: non-legend icons matched to legend entries by DHash
-   - VLM resolution: unmatched icons ON LEGEND PAGES ONLY analyzed by a
-     capable VLM with the full page image + already-known entries as context
-   - Icons on non-legend pages that can't be hash-matched stay unresolved
-    │
-    ▼
-4. Compute CLIP text embeddings for semantic search
-    │
-    ▼
-5. Save glossary.json + invalidate agent cache
+```json
+{
+  "label": "picture",
+  "x0": 224.2, "y0": 383.9, "x1": 325.2, "y1": 296.7,
+  "text": "Red starburst shape with the number 2.",
+  "_vlm_model": "qwen"
+}
 ```
 
-### Why spatial linking?
+The VLM prompt is deliberately minimal: *"Describe exactly what you see: shapes, colors, numbers, and any text. Do not guess what it means or represents."* This produces objective visual descriptions without hallucinating game meaning.
 
-On legend pages, icons appear next to their text labels in a structured layout. The linking algorithm finds the nearest text bbox to each icon bbox using centroid-to-centroid distance, with a directional bias (prefer text below or to the right of the icon — the two most common legend layouts). This handles both "icon-above-caption" and "icon-left-of-label" patterns.
+These descriptions are embedded into chunks and indexed, making visual elements searchable via normal RAG. When the agent retrieves a page, it sees the descriptions in the bbox listing and can reason about them.
 
-### Why DHash + CLIP?
+**What's missing:** The link between a visual description ("red starburst with 2") and its game-semantic meaning ("difficulty level 2" or "order token 2"). The agent's introspection loop may find this through cross-referencing — many rulebooks explain their iconography in a components section. For games where it can't, this is an open problem.
 
-**DHash (imagehash)**: "Are these the same icon?" Perceptual difference hashing is fast and robust to minor rendering variations. Used for deduplication and cross-page matching — if the same fire icon appears on 20 pages, they all cluster to one glossary entry.
-
-**CLIP embeddings (open_clip)**: "What category does this icon belong to?" Enables semantic search in the `lookup_glossary` tool. When the agent searches for "resource icon" or "action symbol," CLIP finds semantically related entries even if the exact name doesn't match.
-
-### Why VLM only on legend pages?
-
-A VLM looking at a random rules page with icons would be guessing at meaning — the same failure mode as the extraction VLM. On a legend page, the meaning IS visually present (icon next to label). The VLM's job on a legend page is structured extraction from a known layout, not open-ended interpretation.
-
-### Chunk enrichment
-
-After the glossary is built, chunks can be re-indexed with icon meanings appended:
-```
-[original chunk text]
-
-[Icons: order token 1 = first task to complete; order token 2 = second task to complete]
-```
-
-This makes icon meanings discoverable via normal text search, not just via the `lookup_glossary` tool.
-
-**Package: `imagehash`** — perceptual hashing (DHash) for icon deduplication
-**Package: `open-clip-torch`** — CLIP embeddings for semantic icon search
+**Future direction:** A mechanism to identify each unique icon and link it to its definition in the rulebook — like a join table from visual description to game meaning. The picture bboxes with coordinates provide the structural foundation for this. The linking strategy is still being designed.
 
 ---
 
@@ -305,8 +254,7 @@ Filtered by `game_id` on every query. Optionally filtered by `doc_tag`.
 ```
 data/games/{game_id}/
 ├── docs/           # Stored document files (PDF, markdown)
-├── extracted/      # Cached Docling extraction JSON (one per document)
-└── glossary.json   # Icon glossary (built on demand)
+└── extracted/      # Cached Docling extraction JSON (one per document)
 ```
 
 Extraction is cached — Docling only runs once per document unless forced. VLM re-enrichment overwrites the cached JSON and triggers reindexing.
@@ -327,7 +275,7 @@ Extraction is cached — Docling only runs once per document unless forced. VLM 
 │ Documents│    [thumbs up/down]    │   or               │
 │ list     │                        │   Markdown with    │
 │          │  User: follow-up       │   text highlights  │
-│ Glossary │  Agent: answer         │                    │
+│ Agent    │  Agent: answer         │                    │
 │          │    [citation chips]    │                    │
 │ Upload   │                        │                    │
 │          │  [chat input]          │                    │
@@ -340,7 +288,7 @@ Layout is adjustable (Chat / Equal / PDF presets). Citation clicks update the do
 
 ### Agent caching
 
-The compiled LangGraph agent is cached via `@st.cache_resource` keyed on `(game_id, model_name, enable_web_search)`. Building or rebuilding a glossary invalidates this cache so the `lookup_glossary` tool appears. Changing the model resets the conversation.
+The compiled LangGraph agent is cached via `@st.cache_resource` keyed on `(game_id, model_name)`. Web search and page vision are always registered as tools but gated at call time via `agent_config` — toggling them mid-conversation takes effect on the next query without rebuilding the agent or losing chat history. Only changing the model resets the conversation.
 
 ---
 
@@ -356,11 +304,7 @@ All configuration lives in `config.py`. Key settings:
 | `RETRIEVAL_TOP_K` | 5 | Pages retrieved per query |
 | `RERANK_PROVIDER` | cohere | Cross-encoder re-ranking |
 | `VLM_DEFAULT_PRESET` | qwen (3B) | Local VLM for picture descriptions |
-| `GLOSSARY_VLM_MODEL` | claude-sonnet-4-6 | VLM for glossary building |
 | `PAGE_VISION_MODEL` | claude-sonnet-4-6 | VLM for page analysis tool |
-| `ICON_AREA_MAX` | 5000 pts² | Max bbox area to consider as icon |
-| `ICON_AREA_MIN` | 100 pts² | Min bbox area (filter noise) |
-| `LEGEND_SCORE_THRESHOLD` | 0.4 | Pages scoring above this are legends |
 
 ---
 
@@ -368,11 +312,9 @@ All configuration lives in `config.py`. Key settings:
 
 | Component | GPU (Apple MPS) | Notes |
 |-----------|----------------|-------|
-| Docling VLM enrichment | Yes | Hardcoded `AcceleratorDevice.MPS` |
-| CLIP embeddings | Yes | Auto-detects MPS |
+| Docling VLM enrichment | Yes | MLX on Apple Silicon, Transformers fallback |
 | Ollama dense embeddings | Yes | Ollama manages GPU internally |
 | SPLADE++ sparse embeddings | No | FastEmbed, CPU — lightweight |
-| DHash perceptual hashing | No | Pure numpy/PIL — fast on CPU |
 | Cohere re-ranking | N/A | API call |
 | LLM agent calls | N/A | API calls |
 
@@ -384,15 +326,13 @@ All configuration lives in `config.py`. Key settings:
 
 **Why citations are mandatory?** The `submit_answer` tool requires citations. The system prompt says "you must call submit_answer to finish." This forces the agent to retrieve before answering — it can't hallucinate a rule because it has to point to where the rule is written. This is the most important quality control mechanism in the system.
 
-**Why VLM descriptions are purely visual?** The extraction VLM prompt says "Do not guess what it means or represents." A 3B model guessing game meanings would hallucinate — the same icon means different things in different games. Visual descriptions are objective; meaning resolution requires cross-referencing, which is the glossary builder's job.
-
-**Why the glossary builder's VLM is limited to legend pages?** A VLM analyzing a random rules page with icons would be guessing, just like the extraction VLM. On a legend page, the answer is visually present (icon next to label). Limiting VLM to legend pages eliminates a hallucination vector.
+**Why VLM descriptions are purely visual?** The extraction VLM prompt says "Do not guess what it means or represents." A 3B model guessing game meanings would hallucinate — the same icon means different things in different games. Visual descriptions are objective. Meaning resolution happens at query time through the agent's cross-referencing behavior.
 
 **Why `view_page` results are not citable?** VLM analysis helps the agent understand visual content, but it's not a source. "The VLM told me this icon means X" is not evidence — "the rulebook page 12 says this icon means X" is evidence. The agent must follow up VLM understanding with text retrieval to produce citable answers.
 
 **Why Cohere over local re-ranking?** Cohere Rerank consistently outperforms open-source alternatives and has a free tier sufficient for a rules agent. The local FastEmbed fallback exists for offline use.
 
-**Why not a knowledge graph?** A knowledge graph of game mechanics would help with multi-hop reasoning, but it requires game-specific ontology design. The current approach (glossary + introspective cross-referencing) handles multi-hop without game-specific structure. A knowledge graph may be worth exploring if the current approach hits limits on very complex rule interactions.
+**Why not a knowledge graph?** A knowledge graph of game mechanics would help with multi-hop reasoning, but it requires game-specific ontology design. The current approach (introspective cross-referencing) handles multi-hop without game-specific structure. A knowledge graph may be worth exploring if the current approach hits limits on very complex rule interactions.
 
 ---
 
